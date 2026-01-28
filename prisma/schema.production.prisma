@@ -1,0 +1,358 @@
+// Production Prisma schema file for PostgreSQL
+// Copy this to schema.prisma when deploying to production
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USER & AUTH MODELS ====================
+
+model User {
+  id             String    @id @default(cuid())
+  username       String    @unique
+  name           String
+  password       String
+  role           String    @default("user") // user, admin
+  bio            String?
+  avatar         String?
+  coverImage     String?
+  location       String?
+  website        String?
+  isVerified     Boolean   @default(false)
+  favoriteTeam   String?
+  favoritePlayer String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  posts          Post[]
+  comments       Comment[]
+  likes          Like[]
+  bookmarks      Bookmark[]
+  followers      Follow[]   @relation("following")
+  following      Follow[]   @relation("follower")
+  notifications  Notification[] @relation("recipient")
+  sentNotifications Notification[] @relation("sender")
+  pollVotes      PollVote[]
+  matchPredictions MatchPrediction[]
+
+  @@index([username])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+// ==================== CONTENT MODELS ====================
+
+model Post {
+  id          String    @id @default(cuid())
+  content     String
+  images      String?   // JSON array of image URLs stored as string
+  authorId    String
+  matchId     String?   // Optional reference to a cricket match
+  isRepost    Boolean   @default(false)
+  originalPostId String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  match       Match?    @relation(fields: [matchId], references: [id])
+  originalPost Post?    @relation("reposts", fields: [originalPostId], references: [id])
+  reposts     Post[]    @relation("reposts")
+  comments    Comment[]
+  likes       Like[]
+  bookmarks   Bookmark[]
+  hashtags    PostHashtag[]
+  poll        Poll?
+
+  @@index([authorId])
+  @@index([matchId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  authorId  String
+  postId    String
+  parentId  String?  // For nested comments/replies
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parent    Comment? @relation("replies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("replies")
+
+  @@index([postId])
+  @@index([authorId])
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId])
+}
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+}
+
+model Poll {
+  id        String     @id @default(cuid())
+  postId    String     @unique
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+
+  // Relations
+  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  options   PollOption[]
+}
+
+model PollOption {
+  id        String     @id @default(cuid())
+  pollId    String
+  text      String
+  createdAt DateTime   @default(now())
+
+  // Relations
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes     PollVote[]
+
+  @@index([pollId])
+}
+
+model PollVote {
+  id        String     @id @default(cuid())
+  userId    String
+  optionId  String
+  createdAt DateTime   @default(now())
+
+  // Relations
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, optionId])
+  @@index([optionId])
+}
+
+// ==================== HASHTAG MODELS ====================
+
+model Hashtag {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  createdAt DateTime      @default(now())
+
+  // Relations
+  posts     PostHashtag[]
+
+  @@index([name])
+}
+
+model PostHashtag {
+  id        String   @id @default(cuid())
+  postId    String
+  hashtagId String
+  createdAt DateTime @default(now())
+
+  // Relations
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  hashtag   Hashtag  @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, hashtagId])
+  @@index([hashtagId])
+}
+
+// ==================== NOTIFICATION MODELS ====================
+
+model Notification {
+  id          String   @id @default(cuid())
+  type        String   // like, comment, follow, mention, match_update
+  recipientId String
+  senderId    String?
+  postId      String?
+  matchId     String?
+  message     String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  recipient   User     @relation("recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  sender      User?    @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId])
+  @@index([createdAt])
+}
+
+// ==================== CRICKET MODELS ====================
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  shortName   String   // e.g., "IND", "AUS", "ENG"
+  logo        String?
+  country     String?
+  teamType    String   // national, franchise, club
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  players     Player[]
+  homeMatches Match[]  @relation("homeTeam")
+  awayMatches Match[]  @relation("awayTeam")
+  wonMatches  Match[]  @relation("winnerTeam")
+
+  @@index([name])
+  @@index([shortName])
+}
+
+model Player {
+  id           String   @id @default(cuid())
+  name         String
+  image        String?
+  country      String
+  role         String   // batsman, bowler, all-rounder, wicket-keeper
+  battingStyle String?
+  bowlingStyle String?
+  dateOfBirth  DateTime?
+  teamId       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  team         Team?    @relation(fields: [teamId], references: [id])
+  performances PlayerPerformance[]
+
+  @@index([name])
+  @@index([teamId])
+}
+
+model Match {
+  id            String    @id @default(cuid())
+  matchType     String    // test, odi, t20, t10
+  format        String    // international, domestic, league
+  venue         String
+  city          String?
+  country       String?
+  startDate     DateTime
+  endDate       DateTime?
+  status        String    // upcoming, live, completed, abandoned
+  homeTeamId    String
+  awayTeamId    String
+  winnerId      String?
+  tossWinnerId  String?
+  tossDecision  String?   // bat, bowl
+  homeScore     String?   // e.g., "324/5"
+  awayScore     String?
+  result        String?   // Match result summary
+  seriesId      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  homeTeam      Team      @relation("homeTeam", fields: [homeTeamId], references: [id])
+  awayTeam      Team      @relation("awayTeam", fields: [awayTeamId], references: [id])
+  winner        Team?     @relation("winnerTeam", fields: [winnerId], references: [id])
+  series        Series?   @relation(fields: [seriesId], references: [id])
+  posts         Post[]
+  performances  PlayerPerformance[]
+  predictions   MatchPrediction[]
+
+  @@index([status])
+  @@index([startDate])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+}
+
+model Series {
+  id          String   @id @default(cuid())
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  format      String   // test, odi, t20, mixed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  matches     Match[]
+
+  @@index([name])
+}
+
+model PlayerPerformance {
+  id           String  @id @default(cuid())
+  playerId     String
+  matchId      String
+  runsScored   Int?
+  ballsFaced   Int?
+  fours        Int?
+  sixes        Int?
+  strikeRate   Float?
+  wicketsTaken Int?
+  oversBowled  Float?
+  runsConceded Int?
+  economy      Float?
+  catches      Int?
+  stumpings    Int?
+  runOuts      Int?
+  isManOfMatch Boolean @default(false)
+
+  // Relations
+  player       Player  @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  match        Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, matchId])
+  @@index([matchId])
+}
+
+model MatchPrediction {
+  id            String   @id @default(cuid())
+  userId        String
+  matchId       String
+  predictedTeam String   // Team ID or team name
+  confidence    Int?     // 1-100
+  createdAt     DateTime @default(now())
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match         Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, matchId])
+  @@index([matchId])
+}
